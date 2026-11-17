@@ -4,7 +4,10 @@ from datetime import date
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
+import requests
 import streamlit as st
+
+FIREBASE_URL = "https://loguii-default-rtdb.firebaseio.com/sistema_vendas_2026"
 
 
 def obter_caminho_logo() -> str | None:
@@ -22,9 +25,6 @@ st.set_page_config(
     layout="wide",
 )
 
-ARQUIVO_VENDAS = "vendas_2026.csv"
-ARQUIVO_METAS = "metas_2026.csv"
-
 USUARIOS = {
     "guiadm": {
         "senha": "programacaoteste",
@@ -40,34 +40,34 @@ USUARIOS = {
     },
 }
 
-HISTORICO_2026_USUARIO_1 = [
-    ("2026-01-31", "guiadm", 117343.52, "Fechamento Janeiro/2026"),
-    ("2026-02-28", "guiadm", 102232.69, "Fechamento Fevereiro/2026"),
-    ("2026-03-31", "guiadm", 121330.00, "Fechamento Março/2026"),
-    ("2026-04-30", "guiadm", 137153.08, "Fechamento Abril/2026"),
-    ("2026-05-31", "guiadm", 107225.29, "Fechamento Maio/2026"),
-    ("2026-06-30", "guiadm", 136796.42, "Fechamento Junho/2026"),
-    ("2026-07-31", "guiadm", 148812.13, "Fechamento Julho/2026"),
-    ("2026-08-31", "guiadm", 152361.81, "Fechamento Agosto/2026"),
-    ("2026-09-30", "guiadm", 201982.79, "Fechamento Setembro/2026"),
-    ("2026-10-31", "guiadm", 178483.27, "Fechamento Outubro/2026"),
-    ("2026-11-17", "guiadm", 81636.40, "Acumulado Parcial Novembro/2026"),
-]
+HISTORICO_2026_USUARIO_1 = {
+    "init_2026_01": {"data": "2026-01-31", "usuario": "guiadm", "valor": 117343.52, "observacao": "Fechamento Janeiro/2026"},
+    "init_2026_02": {"data": "2026-02-28", "usuario": "guiadm", "valor": 102232.69, "observacao": "Fechamento Fevereiro/2026"},
+    "init_2026_03": {"data": "2026-03-31", "usuario": "guiadm", "valor": 121330.00, "observacao": "Fechamento Março/2026"},
+    "init_2026_04": {"data": "2026-04-30", "usuario": "guiadm", "valor": 137153.08, "observacao": "Fechamento Abril/2026"},
+    "init_2026_05": {"data": "2026-05-31", "usuario": "guiadm", "valor": 107225.29, "observacao": "Fechamento Maio/2026"},
+    "init_2026_06": {"data": "2026-06-30", "usuario": "guiadm", "valor": 136796.42, "observacao": "Fechamento Junho/2026"},
+    "init_2026_07": {"data": "2026-07-31", "usuario": "guiadm", "valor": 148812.13, "observacao": "Fechamento Julho/2026"},
+    "init_2026_08": {"data": "2026-08-31", "usuario": "guiadm", "valor": 152361.81, "observacao": "Fechamento Agosto/2026"},
+    "init_2026_09": {"data": "2026-09-30", "usuario": "guiadm", "valor": 201982.79, "observacao": "Fechamento Setembro/2026"},
+    "init_2026_10": {"data": "2026-10-31", "usuario": "guiadm", "valor": 178483.27, "observacao": "Fechamento Outubro/2026"},
+    "init_2026_11": {"data": "2026-11-17", "usuario": "guiadm", "valor": 81636.40, "observacao": "Acumulado Parcial Novembro/2026"},
+}
 
-METAS_INICIAIS_2026 = [
-    ("2026-01", "guiadm", 110000.00),
-    ("2026-02", "guiadm", 100000.00),
-    ("2026-03", "guiadm", 105000.00),
-    ("2026-04", "guiadm", 105000.00),
-    ("2026-05", "guiadm", 120000.00),
-    ("2026-06", "guiadm", 125000.00),
-    ("2026-07", "guiadm", 130000.00),
-    ("2026-08", "guiadm", 140000.00),
-    ("2026-09", "guiadm", 150000.00),
-    ("2026-10", "guiadm", 150000.00),
-    ("2026-11", "guiadm", 150000.00),
-    ("2026-12", "guiadm", 150000.00),
-]
+METAS_INICIAIS_2026 = {
+    "2026-01_guiadm": {"ano_mes": "2026-01", "usuario": "guiadm", "meta": 110000.00},
+    "2026-02_guiadm": {"ano_mes": "2026-02", "usuario": "guiadm", "meta": 100000.00},
+    "2026-03_guiadm": {"ano_mes": "2026-03", "usuario": "guiadm", "meta": 105000.00},
+    "2026-04_guiadm": {"ano_mes": "2026-04", "usuario": "guiadm", "meta": 105000.00},
+    "2026-05_guiadm": {"ano_mes": "2026-05", "usuario": "guiadm", "meta": 120000.00},
+    "2026-06_guiadm": {"ano_mes": "2026-06", "usuario": "guiadm", "meta": 125000.00},
+    "2026-07_guiadm": {"ano_mes": "2026-07", "usuario": "guiadm", "meta": 130000.00},
+    "2026-08_guiadm": {"ano_mes": "2026-08", "usuario": "guiadm", "meta": 140000.00},
+    "2026-09_guiadm": {"ano_mes": "2026-09", "usuario": "guiadm", "meta": 150000.00},
+    "2026-10_guiadm": {"ano_mes": "2026-10", "usuario": "guiadm", "meta": 150000.00},
+    "2026-11_guiadm": {"ano_mes": "2026-11", "usuario": "guiadm", "meta": 150000.00},
+    "2026-12_guiadm": {"ano_mes": "2026-12", "usuario": "guiadm", "meta": 150000.00},
+}
 
 NOMES_MESES = {
     "01": "Jan",
@@ -96,44 +96,104 @@ def calcular_comissao(vendido: float, meta: float) -> tuple[float, float, float]
     return comissao_base, bonus_meta, comissao_base + bonus_meta
 
 
-def inicializar_dados():
-    if not os.path.exists(ARQUIVO_VENDAS):
+def carregar_dados_firebase() -> tuple[pd.DataFrame, pd.DataFrame, bool]:
+    try:
+        resp_v = requests.get(f"{FIREBASE_URL}/vendas.json", timeout=10)
+        resp_v.raise_for_status()
+        dados_v = resp_v.json()
+
+        if not dados_v:
+            requests.put(
+                f"{FIREBASE_URL}/vendas.json",
+                json=HISTORICO_2026_USUARIO_1,
+                timeout=10,
+            ).raise_for_status()
+            dados_v = HISTORICO_2026_USUARIO_1
+
+        resp_m = requests.get(f"{FIREBASE_URL}/metas.json", timeout=10)
+        resp_m.raise_for_status()
+        dados_m = resp_m.json()
+
+        if not dados_m:
+            requests.put(
+                f"{FIREBASE_URL}/metas.json",
+                json=METAS_INICIAIS_2026,
+                timeout=10,
+            ).raise_for_status()
+            dados_m = METAS_INICIAIS_2026
+
+        lista_v = []
+        for reg_id, item in dados_v.items():
+            if isinstance(item, dict):
+                lista_v.append(
+                    {
+                        "id": reg_id,
+                        "data": item.get("data"),
+                        "usuario": item.get("usuario", "guiadm"),
+                        "valor": float(item.get("valor", 0.0)),
+                        "observacao": item.get("observacao", ""),
+                    }
+                )
+
+        lista_m = []
+        for reg_id, item in dados_m.items():
+            if isinstance(item, dict):
+                lista_m.append(
+                    {
+                        "id": reg_id,
+                        "ano_mes": item.get("ano_mes"),
+                        "usuario": item.get("usuario", "guiadm"),
+                        "meta": float(item.get("meta", 0.0)),
+                    }
+                )
+
+        df_v = pd.DataFrame(lista_v)
+        df_m = pd.DataFrame(lista_m)
+
+        df_v["data"] = pd.to_datetime(df_v["data"])
+        df_v = df_v[df_v["data"].dt.year >= 2026].copy()
+        df_v["ano_mes"] = df_v["data"].dt.strftime("%Y-%m")
+
+        return df_v, df_m, True
+
+    except Exception as erro:
+        st.error(f"Erro ao conectar com o Firebase: {erro}")
         df_v = pd.DataFrame(
-            HISTORICO_2026_USUARIO_1,
-            columns=["data", "usuario", "valor", "observacao"],
+            [{"id": k, **v} for k, v in HISTORICO_2026_USUARIO_1.items()]
         )
-        df_v.to_csv(ARQUIVO_VENDAS, index=False)
-
-    if not os.path.exists(ARQUIVO_METAS):
+        df_v["data"] = pd.to_datetime(df_v["data"])
+        df_v["ano_mes"] = df_v["data"].dt.strftime("%Y-%m")
         df_m = pd.DataFrame(
-            METAS_INICIAIS_2026,
-            columns=["ano_mes", "usuario", "meta"],
+            [{"id": k, **v} for k, v in METAS_INICIAIS_2026.items()]
         )
-        df_m.to_csv(ARQUIVO_METAS, index=False)
+        return df_v, df_m, False
 
 
-def carregar_dados() -> tuple[pd.DataFrame, pd.DataFrame]:
-    inicializar_dados()
-    df_v = pd.read_csv(ARQUIVO_VENDAS)
-    df_m = pd.read_csv(ARQUIVO_METAS)
-
-    df_v["data"] = pd.to_datetime(df_v["data"])
-    df_v = df_v[df_v["data"].dt.year >= 2026].copy()
-    df_v["valor"] = df_v["valor"].astype(float)
-    df_v["ano_mes"] = df_v["data"].dt.strftime("%Y-%m")
-
-    df_m["meta"] = df_m["meta"].astype(float)
-    return df_v, df_m
+def adicionar_venda_firebase(data_venda: date, usuario: str, valor: float, observacao: str) -> bool:
+    payload = {
+        "data": data_venda.strftime("%Y-%m-%d"),
+        "usuario": usuario,
+        "valor": float(valor),
+        "observacao": observacao,
+    }
+    resp = requests.post(f"{FIREBASE_URL}/vendas.json", json=payload, timeout=10)
+    return resp.status_code == 200
 
 
-def salvar_vendas(df_v: pd.DataFrame):
-    df_save = df_v[["data", "usuario", "valor", "observacao"]].copy()
-    df_save["data"] = pd.to_datetime(df_save["data"]).dt.strftime("%Y-%m-%d")
-    df_save.to_csv(ARQUIVO_VENDAS, index=False)
+def excluir_venda_firebase(reg_id: str) -> bool:
+    resp = requests.delete(f"{FIREBASE_URL}/vendas/{reg_id}.json", timeout=10)
+    return resp.status_code == 200
 
 
-def salvar_metas(df_m: pd.DataFrame):
-    df_m[["ano_mes", "usuario", "meta"]].to_csv(ARQUIVO_METAS, index=False)
+def salvar_meta_firebase(ano_mes: str, usuario: str, meta: float) -> bool:
+    chave = f"{ano_mes}_{usuario}"
+    payload = {
+        "ano_mes": ano_mes,
+        "usuario": usuario,
+        "meta": float(meta),
+    }
+    resp = requests.put(f"{FIREBASE_URL}/metas/{chave}.json", json=payload, timeout=10)
+    return resp.status_code == 200
 
 
 def tela_login():
@@ -165,9 +225,9 @@ def app_principal():
     info_user = USUARIOS[login]
     eh_admin = info_user["perfil"] == "admin"
 
-    df_v, df_m = carregar_dados()
+    df_v, df_m, conectado_firebase = carregar_dados_firebase()
 
-    # Barra lateral com a logo no topo
+    # Barra lateral
     with st.sidebar:
         if CAMINHO_LOGO:
             st.image(CAMINHO_LOGO, use_container_width=True)
@@ -175,6 +235,15 @@ def app_principal():
 
         st.markdown(f"### 👤 {info_user['label']}")
         st.caption(f"Perfil: **{'Administrador (Usuário 1)' if eh_admin else 'Vendedora'}**")
+
+        if conectado_firebase:
+            st.success("🟢 Nuvem Firebase conectada")
+        else:
+            st.warning("🟡 Modo offline temporário")
+
+        if st.button("🔄 Sincronizar Dados", use_container_width=True):
+            st.rerun()
+
         st.divider()
 
         if eh_admin:
@@ -287,27 +356,16 @@ def app_principal():
             else:
                 usuario_destino = login
 
-            salvar_btn = st.form_submit_button("Salvar Venda", type="primary")
+            salvar_btn = st.form_submit_button("Salvar Venda na Nuvem", type="primary")
             if salvar_btn:
-                novo_reg = pd.DataFrame(
-                    [
-                        {
-                            "data": pd.to_datetime(data_venda),
-                            "usuario": usuario_destino,
-                            "valor": float(valor_venda),
-                            "observacao": obs_venda.strip() if obs_venda.strip() else "Lançamento diário",
-                        }
-                    ]
-                )
-                df_v_atualizado = pd.concat(
-                    [df_v[["data", "usuario", "valor", "observacao"]], novo_reg],
-                    ignore_index=True,
-                )
-                salvar_vendas(df_v_atualizado)
-                st.success(
-                    f"Venda de {formatar_brl(valor_venda)} registrada com sucesso para {USUARIOS[usuario_destino]['nome']}!"
-                )
-                st.rerun()
+                obs_limpa = obs_venda.strip() if obs_venda.strip() else "Lançamento diário"
+                if adicionar_venda_firebase(data_venda, usuario_destino, valor_venda, obs_limpa):
+                    st.success(
+                        f"Venda de {formatar_brl(valor_venda)} salva no Firebase para {USUARIOS[usuario_destino]['nome']}!"
+                    )
+                    st.rerun()
+                else:
+                    st.error("Não foi possível salvar no Firebase. Tente novamente.")
 
     # ABA 2: Gráficos
     with aba_dashboard:
@@ -418,20 +476,14 @@ def app_principal():
                 step=5000.0,
                 format="%.2f",
             )
-            if st.form_submit_button("Atualizar Meta", disabled=not eh_admin):
-                mask = (df_m["ano_mes"] == mes_edit) & (df_m["usuario"] == usuario_meta)
-                if mask.any():
-                    df_m.loc[mask, "meta"] = nova_meta
-                else:
-                    novo_m = pd.DataFrame(
-                        [{"ano_mes": mes_edit, "usuario": usuario_meta, "meta": nova_meta}]
+            if st.form_submit_button("Atualizar Meta na Nuvem", disabled=not eh_admin):
+                if salvar_meta_firebase(mes_edit, usuario_meta, nova_meta):
+                    st.success(
+                        f"Meta de {mes_edit} salva no Firebase para {USUARIOS[usuario_meta]['nome']}: {formatar_brl(nova_meta)}!"
                     )
-                    df_m = pd.concat([df_m, novo_m], ignore_index=True)
-                salvar_metas(df_m)
-                st.success(
-                    f"Meta de {mes_edit} atualizada para {formatar_brl(nova_meta)} ({USUARIOS[usuario_meta]['nome']})!"
-                )
-                st.rerun()
+                    st.rerun()
+                else:
+                    st.error("Erro ao salvar meta no Firebase.")
 
     # ABA 4: Histórico e Exportação
     with aba_historico:
@@ -448,6 +500,7 @@ def app_principal():
             hide_index=True,
         )
 
+        # Exportar para Excel
         buffer = io.BytesIO()
         with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
             df_exibir[["Data", "Usuário", "Valor (R$)", "Observação"]].to_excel(
@@ -464,6 +517,26 @@ def app_principal():
             file_name=f"relatorio_vendas_2026_{date.today().strftime('%Y%m%d')}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
+
+        # Opção para excluir um lançamento errado
+        if not df_exibir.empty:
+            st.divider()
+            with st.expander("🗑️ Excluir um lançamento"):
+                opcoes_del = {
+                    row["id"]: f"{row['Data']} — {row['Usuário']} — {formatar_brl(row['valor'])} ({row['Observação']})"
+                    for _, row in df_exibir.iterrows()
+                }
+                id_para_excluir = st.selectbox(
+                    "Selecione o registro para apagar:",
+                    options=list(opcoes_del.keys()),
+                    format_func=lambda k: opcoes_del[k],
+                )
+                if st.button("Confirmar Exclusão", type="secondary"):
+                    if excluir_venda_firebase(id_para_excluir):
+                        st.success("Lançamento removido do Firebase!")
+                        st.rerun()
+                    else:
+                        st.error("Erro ao excluir registro.")
 
 
 if "usuario_logado" not in st.session_state:
