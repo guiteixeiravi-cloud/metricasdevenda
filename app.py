@@ -1,4 +1,5 @@
 import calendar
+from datetime import date
 import io
 import os
 import pandas as pd
@@ -25,6 +26,29 @@ def obter_caminho_logo() -> str | None:
         if os.path.exists(nome_arquivo):
             return nome_arquivo
     return None
+
+
+def calcular_calendario_seg_sab(ano: int, mes: int, hoje: date) -> tuple[int, int, int]:
+    """Calcula dias comerciais considerando Segunda (0) a Sábado (5), excluindo Domingos (6)."""
+    num_dias = calendar.monthrange(ano, mes)[1]
+    todas_datas = [date(ano, mes, d) for d in range(1, num_dias + 1)]
+    dias_uteis = [d for d in todas_datas if d.weekday() < 6]
+    total_uteis = len(dias_uteis)
+
+    ym_sel = f"{ano:04d}-{mes:02d}"
+    ym_hoje = hoje.strftime("%Y-%m")
+
+    if ym_sel < ym_hoje:
+        passados = total_uteis
+        restantes = 0
+    elif ym_sel > ym_hoje:
+        passados = 0
+        restantes = total_uteis
+    else:
+        passados = max(1, len([d for d in dias_uteis if d <= hoje]))
+        restantes = len([d for d in dias_uteis if d >= hoje])
+
+    return total_uteis, passados, restantes
 
 
 CAMINHO_LOGO = obter_caminho_logo()
@@ -78,9 +102,13 @@ def app_principal():
     eh_admin = info_user["perfil"] == "admin"
 
     agora = agora_brasil()
+    hoje_date = agora.date()
     hoje_str = agora.strftime("%Y-%m-%d")
     hoje_br = agora.strftime("%d/%m/%Y")
     mes_atual_str = agora.strftime("%Y-%m")
+
+    dias_semana_pt = ["Segunda-feira", "Terça-feira", "Quarta-feira", "Quinta-feira", "Sexta-feira", "Sábado", "Domingo"]
+    nome_dia_hoje = dias_semana_pt[hoje_date.weekday()]
 
     df_v, df_m, conectado_firebase = carregar_dados_firebase()
 
@@ -148,13 +176,19 @@ def app_principal():
         df_m_filtrado = df_m[df_m["usuario"] == filtro_usuario].copy()
         nome_visao = USUARIOS[filtro_usuario]["nome"]
 
+    # Calendário comercial Segunda a Sábado (sem domingos)
+    ano_sel, mes_sel_num = map(int, mes_selecionado.split("-"))
+    dias_uteis_mes, dias_uteis_passados, dias_uteis_restantes = calcular_calendario_seg_sab(
+        ano_sel, mes_sel_num, hoje_date
+    )
+
     # ==========================================================
     # 1. BANNER SUPERIOR + LANÇAMENTO RÁPIDO (APENAS VALOR)
     # ==========================================================
     col_ban_esq, col_ban_dir = st.columns([1.45, 1], vertical_alignment="center")
 
     with col_ban_esq:
-        c_logo, c_txt = st.columns([0.18, 0.82], vertical_alignment="center")
+        c_logo, c_txt = st.columns([0.17, 0.83], vertical_alignment="center")
         with c_logo:
             if CAMINHO_LOGO:
                 st.image(CAMINHO_LOGO, use_container_width=True)
@@ -163,32 +197,36 @@ def app_principal():
             st.markdown(
                 f"""
                 <div class="top-banner" style="margin-bottom:0;">
-                    <span class="badge-live">{status_badge} • {hoje_br}</span>
-                    <div class="welcome-title" style="margin-top:6px;">👋 Bem vindo, {info_user['nome']}</div>
-                    <div class="welcome-sub">Exibindo resultados de: <b>{nome_visao}</b> • Referência: <b>{mes_selecionado}</b></div>
+                    <div>
+                        <span class="badge-live">{status_badge} • {nome_dia_hoje}, {hoje_br}</span>
+                        <span class="badge-workdays">🗓️ Seg–Sáb: {dias_uteis_passados}/{dias_uteis_mes} dias úteis ({dias_uteis_restantes} restantes)</span>
+                    </div>
+                    <div class="welcome-title">👋 Bem vindo, {info_user['nome']}</div>
+                    <div class="welcome-sub">Visão ativa: <b>{nome_visao}</b> • Período: <b>{mes_selecionado}</b></div>
                 </div>
                 """,
                 unsafe_allow_html=True,
             )
 
     with col_ban_dir:
+        st.markdown('<div class="quick-add-box">', unsafe_allow_html=True)
         st.markdown(
             """
-            <div style="font-size:0.85rem; font-weight:700; color:#f8fafc; margin-bottom:4px;">
-                ⚡ Lançar Venda de Hoje (Apenas o Valor)
+            <div style="font-size:0.86rem; font-weight:800; color:#f8fafc; margin-bottom:6px;">
+                ⚡ Lançamento Rápido de Hoje (Apenas Valor)
             </div>
             """,
             unsafe_allow_html=True,
         )
         with st.form("form_venda_rapida", clear_on_submit=True):
-            c_val, c_btn = st.columns([1.4, 1], vertical_alignment="bottom")
+            c_val, c_btn = st.columns([1.45, 1], vertical_alignment="bottom")
             valor_rapido = c_val.number_input(
                 "Valor da Venda (R$)",
                 min_value=0.01,
                 value=None,
                 step=50.0,
                 format="%.2f",
-                placeholder="Ex: 1250,00",
+                placeholder="Digite o valor (Ex: 450,00)",
                 label_visibility="collapsed",
             )
             enviado = c_btn.form_submit_button("➕ Registrar", use_container_width=True)
@@ -202,18 +240,18 @@ def app_principal():
                         st.error("Erro ao salvar no Firebase.")
                 else:
                     st.warning("Digite o valor da venda.")
+        st.markdown("</div>", unsafe_allow_html=True)
 
     st.markdown("<br>", unsafe_allow_html=True)
 
     # ==========================================================
-    # 2. PAINEL DE HOJE (VENDAS DO DIA LOGO AO ABRIR)
+    # 2. PAINEL DE HOJE + TERMÔMETRO DIÁRIO (SEG A SÁB)
     # ==========================================================
     df_hoje = df_v_filtrado[df_v_filtrado["data_str"] == hoje_str].copy()
     total_hoje = df_hoje["valor"].sum() if not df_hoje.empty else 0.0
     qtd_hoje = len(df_hoje)
     ticket_hoje = (total_hoje / qtd_hoje) if qtd_hoje > 0 else 0.0
 
-    # Cálculos do mês selecionado e ritmo diário
     vendido_mes = df_v_filtrado[df_v_filtrado["ano_mes"] == mes_selecionado]["valor"].sum()
     meta_mes = df_m_filtrado[df_m_filtrado["ano_mes"] == mes_selecionado]["meta"].sum()
     com_base, com_bonus, com_total = calcular_comissao(vendido_mes, meta_mes)
@@ -221,17 +259,23 @@ def app_principal():
     excedente_meta = max(0.0, vendido_mes - meta_mes)
     pct_meta = (vendido_mes / meta_mes * 100) if meta_mes > 0 else 0.0
 
-    ano_sel, mes_sel_num = map(int, mes_selecionado.split("-"))
-    dias_no_mes = calendar.monthrange(ano_sel, mes_sel_num)[1]
-    if mes_selecionado == mes_atual_str:
-        dias_restantes = max(1, dias_no_mes - agora.day + 1)
-        dias_passados = max(1, agora.day)
-    else:
-        dias_restantes = dias_no_mes
-        dias_passados = dias_no_mes
-
-    ritmo_necessario = (falta_meta / dias_restantes) if falta_meta > 0 else 0.0
-    projecao_mes = (vendido_mes / dias_passados) * dias_no_mes if mes_selecionado == mes_atual_str else vendido_mes
+    # Cálculos comerciais excluindo domingos
+    ritmo_necessario = (
+        (falta_meta / dias_uteis_restantes)
+        if (falta_meta > 0 and dias_uteis_restantes > 0)
+        else 0.0
+    )
+    media_util_atual = (vendido_mes / dias_uteis_passados) if dias_uteis_passados > 0 else 0.0
+    projecao_mes = (
+        media_util_atual * dias_uteis_mes
+        if mes_selecionado == mes_atual_str
+        else vendido_mes
+    )
+    pct_hoje_vs_meta_dia = (
+        (total_hoje / ritmo_necessario * 100)
+        if ritmo_necessario > 0
+        else (100.0 if total_hoje > 0 else 0.0)
+    )
 
     # Acumulado Anual 2026
     total_ano_2026 = df_v_filtrado["valor"].sum()
@@ -242,9 +286,9 @@ def app_principal():
         _, _, c_item = calcular_comissao(v_item, m_item)
         comissao_ano_2026 += c_item
 
-    st.markdown(f'<div class="section-header">🔥 Resumo & Vendas de Hoje ({hoje_br})</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="section-header">🔥 Operação de Hoje ({nome_dia_hoje}, {hoje_br})</div>', unsafe_allow_html=True)
 
-    col_hoje_kpis, col_hoje_lista = st.columns([1.15, 1.35], gap="medium")
+    col_hoje_kpis, col_hoje_lista = st.columns([1.2, 1.3], gap="medium")
 
     with col_hoje_kpis:
         hk1, hk2 = st.columns(2)
@@ -254,34 +298,19 @@ def app_principal():
                 <div class="kpi-card kpi-accent-green">
                     <div class="kpi-label">Vendido Hoje</div>
                     <div class="kpi-value">{formatar_brl(total_hoje)}</div>
-                    <div class="kpi-delta"><span class="delta-pos">{qtd_hoje} venda(s)</span> registrada(s)</div>
+                    <div class="kpi-delta"><span class="delta-pos">{qtd_hoje} entrada(s)</span> hoje • Ticket: {formatar_brl(ticket_hoje)}</div>
                 </div>
                 """,
                 unsafe_allow_html=True,
             )
         with hk2:
-            st.markdown(
-                f"""
-                <div class="kpi-card kpi-accent-blue">
-                    <div class="kpi-label">Ticket Médio Hoje</div>
-                    <div class="kpi-value">{formatar_brl(ticket_hoje)}</div>
-                    <div class="kpi-delta">Média por lançamento</div>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-
-        st.markdown("<div style='height:10px;'></div>", unsafe_allow_html=True)
-
-        hk3, hk4 = st.columns(2)
-        with hk3:
-            if falta_meta > 0:
+            if falta_meta > 0 and dias_uteis_restantes > 0:
                 st.markdown(
                     f"""
                     <div class="kpi-card kpi-accent-amber">
-                        <div class="kpi-label">Meta Diária Ideal</div>
+                        <div class="kpi-label">Meta Diária (Seg–Sáb)</div>
                         <div class="kpi-value">{formatar_brl(ritmo_necessario)}</div>
-                        <div class="kpi-delta">Nos próximos <span class="delta-warn">{dias_restantes} dia(s)</span></div>
+                        <div class="kpi-delta">Restam <span class="delta-warn">{dias_uteis_restantes} dia(s) úteis</span> s/ domingo</div>
                     </div>
                     """,
                     unsafe_allow_html=True,
@@ -290,37 +319,70 @@ def app_principal():
                 st.markdown(
                     f"""
                     <div class="kpi-card kpi-accent-green">
-                        <div class="kpi-label">Status da Meta</div>
-                        <div class="kpi-value">Batida! 🚀</div>
-                        <div class="kpi-delta"><span class="delta-pos">+{formatar_brl(excedente_meta)}</span> acima</div>
+                        <div class="kpi-label">Meta Diária (Seg–Sáb)</div>
+                        <div class="kpi-value">Concluída! 🏆</div>
+                        <div class="kpi-delta">Excedente: <span class="delta-pos">+{formatar_brl(excedente_meta)}</span></div>
                     </div>
                     """,
                     unsafe_allow_html=True,
                 )
-        with hk4:
+
+        st.markdown("<div style='height:10px;'></div>", unsafe_allow_html=True)
+
+        hk3, hk4 = st.columns(2)
+        with hk3:
             st.markdown(
                 f"""
-                <div class="kpi-card kpi-accent-red">
-                    <div class="kpi-label">Projeção do Mês</div>
+                <div class="kpi-card kpi-accent-blue">
+                    <div class="kpi-label">Média / Dia Útil</div>
+                    <div class="kpi-value">{formatar_brl(media_util_atual)}</div>
+                    <div class="kpi-delta">Base: <b>{dias_uteis_passados} dias úteis</b> (Seg–Sáb)</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+        with hk4:
+            _, _, com_proj = calcular_comissao(projecao_mes, meta_mes)
+            st.markdown(
+                f"""
+                <div class="kpi-card kpi-accent-purple">
+                    <div class="kpi-label">Projeção Fechamento</div>
                     <div class="kpi-value">{formatar_brl(projecao_mes)}</div>
-                    <div class="kpi-delta">Ritmo atual do período</div>
+                    <div class="kpi-delta">Comissão proj.: <span class="delta-pos">{formatar_brl(com_proj)}</span></div>
                 </div>
                 """,
                 unsafe_allow_html=True,
             )
 
+        # Termômetro da Meta do Dia
+        larg_dia = min(pct_hoje_vs_meta_dia, 100.0)
+        st.markdown(
+            f"""
+            <div class="prog-container">
+                <div style="display:flex; justify-content:space-between; font-size:0.82rem; color:#cbd5e1;">
+                    <span>🎯 <b>Termômetro de Hoje</b> (Vendido Hoje vs. Meta Diária Seg–Sáb)</span>
+                    <span class="delta-pos">{pct_hoje_vs_meta_dia:.1f}%</span>
+                </div>
+                <div class="prog-wrap">
+                    <div class="prog-fill-day" style="width: {larg_dia:.1f}%;"></div>
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
     with col_hoje_lista:
         st.markdown(
             """
-            <div style="background: rgba(15, 23, 42, 0.75); border: 1px solid rgba(255,255,255,0.08); border-radius: 14px; padding: 14px 16px;">
-                <div style="font-size:0.85rem; font-weight:700; color:#e2e8f0; margin-bottom:10px;">
-                    🧾 Lançamentos Realizados Hoje
+            <div style="background: rgba(15, 23, 42, 0.78); border: 1px solid rgba(255,255,255,0.08); border-radius: 16px; padding: 16px 18px; height: 100%;">
+                <div style="font-size:0.88rem; font-weight:800; color:#f1f5f9; margin-bottom:10px;">
+                    🧾 Entradas Registradas Hoje
                 </div>
             """,
             unsafe_allow_html=True,
         )
         if df_hoje.empty:
-            st.info("Nenhuma venda registrada hoje ainda. Digite o valor no campo acima para lançar a primeira!")
+            st.info("Nenhuma venda registrada hoje ainda. Digite apenas o valor lá no topo para somar a primeira!")
         else:
             df_hoje_ord = df_hoje.iloc[::-1].copy()
             for _, row in df_hoje_ord.iterrows():
@@ -350,9 +412,9 @@ def app_principal():
     st.divider()
 
     # ==========================================================
-    # 3. INDICADORES PRINCIPAIS DO MÊS & ACUMULADO 2026
+    # 3. INDICADORES PRINCIPAIS DO MÊS & VELOCÍMETRO DA META
     # ==========================================================
-    st.markdown(f'<div class="section-header">📊 Desempenho Consolidado — {mes_selecionado} & Ano 2026</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="section-header">📊 Fechamento do Mês ({mes_selecionado}) & Acumulado 2026</div>', unsafe_allow_html=True)
 
     k1, k2, k3, k4 = st.columns(4)
     with k1:
@@ -385,9 +447,9 @@ def app_principal():
         st.markdown(
             f"""
             <div class="kpi-card kpi-accent-green">
-                <div class="kpi-label">Comissão Estimada (Mês)</div>
+                <div class="kpi-label">Comissão Total (Mês)</div>
                 <div class="kpi-value">{formatar_brl(com_total)}</div>
-                <div class="kpi-delta">Base: {formatar_brl(com_base)} | Bônus: {formatar_brl(com_bonus)}</div>
+                <div class="kpi-delta">0,15%: {formatar_brl(com_base)} | +0,5%: {formatar_brl(com_bonus)}</div>
             </div>
             """,
             unsafe_allow_html=True,
@@ -396,7 +458,7 @@ def app_principal():
         st.markdown(
             f"""
             <div class="kpi-card kpi-accent-red">
-                <div class="kpi-label">Acumulado Total 2026</div>
+                <div class="kpi-label">Acumulado Anual 2026</div>
                 <div class="kpi-value">{formatar_brl(total_ano_2026)}</div>
                 <div class="kpi-delta">Comissões 2026: <span class="delta-pos">{formatar_brl(comissao_ano_2026)}</span></div>
             </div>
@@ -404,22 +466,10 @@ def app_principal():
             unsafe_allow_html=True,
         )
 
-    largura_barra = min(pct_meta, 100.0)
-    st.markdown(
-        f"""
-        <div class="prog-wrap">
-            <div class="prog-fill" style="width: {largura_barra:.1f}%;"></div>
-        </div>
-        <div style="display:flex; justify-content:space-between; font-size:0.8rem; color:#94a3b8; margin-bottom:14px;">
-            <span>Progresso da Meta ({mes_selecionado})</span>
-            <span><b>{pct_meta:.1f}%</b></span>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+    st.markdown("<br>", unsafe_allow_html=True)
 
     # ==========================================================
-    # 4. GRÁFICOS INTERATIVOS DIRETO NA DASH PRINCIPAL
+    # 4. GRÁFICOS MODERNOS (GAUGE, SEMANAL, DIÁRIO E ANUAL)
     # ==========================================================
     todos_meses_base = sorted(df_m["ano_mes"].unique())
     resumo_mensal = []
@@ -440,9 +490,42 @@ def app_principal():
         )
     df_resumo = pd.DataFrame(resumo_mensal)
 
-    col_graf_1, col_graf_2 = st.columns([1.35, 1], gap="medium")
+    col_g_gauge, col_g_mensal = st.columns([1, 1.55], gap="medium")
 
-    with col_graf_1:
+    with col_g_gauge:
+        st.markdown('<div class="section-header">🎯 Velocímetro da Meta & Bônus 0,5%</div>', unsafe_allow_html=True)
+        fig_gauge = go.Figure(
+            go.Indicator(
+                mode="gauge+number+delta",
+                value=pct_meta,
+                number={"suffix": "%", "font": {"size": 34, "color": "#f8fafc"}},
+                delta={"reference": 100.0, "increasing": {"color": "#10b981"}, "decreasing": {"color": "#f43f5e"}},
+                gauge={
+                    "axis": {"range": [0, max(130, pct_meta + 10)], "tickcolor": "#94a3b8"},
+                    "bar": {"color": "#10b981" if pct_meta >= 100 else "#e11d48"},
+                    "bgcolor": "rgba(15,23,42,0.6)",
+                    "steps": [
+                        {"range": [0, 70], "color": "rgba(225, 29, 72, 0.18)"},
+                        {"range": [70, 100], "color": "rgba(245, 158, 11, 0.22)"},
+                        {"range": [100, max(130, pct_meta + 10)], "color": "rgba(16, 185, 129, 0.25)"},
+                    ],
+                    "threshold": {
+                        "line": {"color": "#fbbf24", "width": 4},
+                        "thickness": 0.8,
+                        "value": 100,
+                    },
+                },
+            )
+        )
+        fig_gauge.update_layout(
+            height=320,
+            margin=dict(l=20, r=20, t=30, b=10),
+            paper_bgcolor="rgba(0,0,0,0)",
+            font=dict(color="#e2e8f0"),
+        )
+        st.plotly_chart(fig_gauge, use_container_width=True)
+
+    with col_g_mensal:
         st.markdown('<div class="section-header">📈 Evolução Mensal 2026 (Realizado vs. Meta)</div>', unsafe_allow_html=True)
         if not df_resumo.empty:
             cores_barras = ["#10b981" if b else "#e11d48" for b in df_resumo["Bateu"]]
@@ -466,7 +549,7 @@ def app_principal():
                 )
             )
             fig_mensal.update_layout(
-                height=340,
+                height=320,
                 margin=dict(l=10, r=10, t=20, b=10),
                 paper_bgcolor="rgba(0,0,0,0)",
                 plot_bgcolor="rgba(15,23,42,0.45)",
@@ -476,11 +559,14 @@ def app_principal():
             )
             st.plotly_chart(fig_mensal, use_container_width=True)
 
-    with col_graf_2:
-        st.markdown(f'<div class="section-header">📅 Vendas Diárias — {mes_selecionado}</div>', unsafe_allow_html=True)
+    # Segunda linha de gráficos: Diário + Semanal do Mês
+    df_mes_atual = df_v_filtrado[df_v_filtrado["ano_mes"] == mes_selecionado].copy()
+    col_g_dia, col_g_sem = st.columns([1.35, 1], gap="medium")
+
+    with col_g_dia:
+        st.markdown(f'<div class="section-header">📅 Evolução Diária — {mes_selecionado}</div>', unsafe_allow_html=True)
         df_diario = (
-            df_v_filtrado[df_v_filtrado["ano_mes"] == mes_selecionado]
-            .groupby("data", as_index=False)["valor"]
+            df_mes_atual.groupby("data", as_index=False)["valor"]
             .sum()
             .sort_values("data")
         )
@@ -493,8 +579,16 @@ def app_principal():
                 labels={"Dia": "Data", "valor": "Vendido (R$)"},
                 color_discrete_sequence=["#3b82f6"],
             )
+            if ritmo_necessario > 0:
+                fig_dia.add_hline(
+                    y=ritmo_necessario,
+                    line_dash="dot",
+                    line_color="#f59e0b",
+                    annotation_text="Meta/Dia (Seg-Sáb)",
+                    annotation_position="top left",
+                )
             fig_dia.update_layout(
-                height=340,
+                height=300,
                 margin=dict(l=10, r=10, t=20, b=10),
                 paper_bgcolor="rgba(0,0,0,0)",
                 plot_bgcolor="rgba(15,23,42,0.45)",
@@ -504,11 +598,41 @@ def app_principal():
         else:
             st.info("Nenhum lançamento neste mês ainda.")
 
+    with col_g_sem:
+        st.markdown(f'<div class="section-header">📊 Ritmo por Semana — {mes_selecionado}</div>', unsafe_allow_html=True)
+        if not df_mes_atual.empty:
+            df_mes_atual["Semana"] = df_mes_atual["data"].dt.day.map(
+                lambda d: f"Semana {(d - 1) // 7 + 1}"
+            )
+            df_semanal = (
+                df_mes_atual.groupby("Semana", as_index=False)["valor"]
+                .sum()
+                .sort_values("Semana")
+            )
+            fig_sem = px.bar(
+                df_semanal,
+                x="Semana",
+                y="valor",
+                text_auto=".2s",
+                labels={"Semana": "Semana do Mês", "valor": "Total (R$)"},
+                color_discrete_sequence=["#a855f7"],
+            )
+            fig_sem.update_layout(
+                height=300,
+                margin=dict(l=10, r=10, t=20, b=10),
+                paper_bgcolor="rgba(0,0,0,0)",
+                plot_bgcolor="rgba(15,23,42,0.45)",
+                font=dict(color="#e2e8f0"),
+            )
+            st.plotly_chart(fig_sem, use_container_width=True)
+        else:
+            st.info("Sem dados semanais para este mês.")
+
     # ==========================================================
-    # 5. HISTÓRICO COMPLETO, METAS E EXPORTAÇÃO NA MESMA TELA
+    # 5. SIMULADOR DE COMISSÃO + HISTÓRICO & GERENCIAMENTO
     # ==========================================================
     st.divider()
-    col_hist, col_gestao = st.columns([1.5, 1], gap="medium")
+    col_hist, col_gestao = st.columns([1.45, 1.05], gap="medium")
 
     with col_hist:
         st.markdown('<div class="section-header">📋 Histórico Completo de Lançamentos (2026+)</div>', unsafe_allow_html=True)
@@ -523,7 +647,7 @@ def app_principal():
             df_exibir[["Data", "Hora", "Usuário", "Valor (R$)", "Observação"]],
             use_container_width=True,
             hide_index=True,
-            height=260,
+            height=270,
         )
 
         buffer = io.BytesIO()
@@ -545,9 +669,31 @@ def app_principal():
         )
 
     with col_gestao:
-        st.markdown('<div class="section-header">⚙️ Metas & Gerenciamento</div>', unsafe_allow_html=True)
+        st.markdown('<div class="section-header">🧮 Simulador & Configurações</div>', unsafe_allow_html=True)
+
+        with st.expander("💰 Simulador Rápido de Comissão", expanded=True):
+            alvo_padrao = float(max(vendido_mes, meta_mes, 150000.0))
+            valor_simulado = st.slider(
+                "Simular fechamento do mês em (R$):",
+                min_value=50000.0,
+                max_value=300000.0,
+                value=min(300000.0, alvo_padrao),
+                step=2500.0,
+            )
+            s_base, s_bonus, s_tot = calcular_comissao(valor_simulado, meta_mes)
+            st.markdown(
+                f"""
+                <div style="font-size:0.88rem; color:#cbd5e1; line-height:1.6;">
+                    • Comissão Base (0,15%): <b>{formatar_brl(s_base)}</b><br>
+                    • Bônus Acima da Meta (0,5%): <b style="color:#34d399;">{formatar_brl(s_bonus)}</b><br>
+                    • <b>Total a Receber: <span style="color:#fbbf24; font-size:1.05rem;">{formatar_brl(s_tot)}</span></b>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
         if eh_admin:
-            with st.expander("🎯 Configurar Metas Mensais", expanded=True):
+            with st.expander("🎯 Configurar Metas Mensais"):
                 with st.form("form_editar_meta"):
                     usuario_meta = st.selectbox(
                         "Usuário:",
@@ -574,8 +720,6 @@ def app_principal():
                         if salvar_meta_firebase(mes_edit, usuario_meta, nova_meta):
                             st.success(f"Meta de {mes_edit} atualizada!")
                             st.rerun()
-        else:
-            st.info(f"Meta atual de {mes_selecionado}: **{formatar_brl(meta_mes)}**")
 
         if not df_exibir.empty:
             with st.expander("🗑️ Excluir Lançamento Antigo"):
