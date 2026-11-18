@@ -29,7 +29,6 @@ def obter_caminho_logo() -> str | None:
 
 
 def calcular_calendario_seg_sab(ano: int, mes: int, hoje: date) -> tuple[int, int, int]:
-    """Calcula dias comerciais considerando Segunda (0) a Sábado (5), excluindo Domingos (6)."""
     num_dias = calendar.monthrange(ano, mes)[1]
     todas_datas = [date(ano, mes, d) for d in range(1, num_dias + 1)]
     dias_uteis = [d for d in todas_datas if d.weekday() < 6]
@@ -62,6 +61,14 @@ st.set_page_config(
 aplicar_estilo_avancado()
 
 
+# --- PERSISTÊNCIA DE SESSÃO (MANTER LOGADO AO ATUALIZAR A PÁGINA) ---
+if "usuario_logado" not in st.session_state:
+    # Tenta restaurar do query_params se houver
+    params = st.query_params
+    if "user" in params and params["user"] in USUARIOS:
+        st.session_state["usuario_logado"] = params["user"]
+
+
 def tela_login():
     st.markdown("<br>", unsafe_allow_html=True)
     col1, col2, col3 = st.columns([1, 1.15, 1])
@@ -91,6 +98,7 @@ def tela_login():
             if entrar:
                 if login in USUARIOS and USUARIOS[login]["senha"] == senha:
                     st.session_state["usuario_logado"] = login
+                    st.query_params["user"] = login
                     st.rerun()
                 else:
                     st.error("Usuário ou senha incorretos.")
@@ -119,7 +127,7 @@ def app_principal():
             st.divider()
 
         st.markdown(f"### 👤 {info_user['label']}")
-        st.caption(f"Perfil: **{'Administrador (Usuário 1)' if eh_admin else 'Vendedora'}**")
+        st.caption(f"Perfil: **{'Administrador' if eh_admin else 'Vendedora'}**")
 
         if conectado_firebase:
             st.success("🟢 Firebase sincronizado")
@@ -138,7 +146,7 @@ def app_principal():
                 format_func=lambda x: (
                     "Consolidado (Todos)"
                     if x == "TODOS"
-                    else USUARIOS[x]["label"]
+                    else f"Guilherme (guiadm)" if x == "guiadm" else USUARIOS[x]["label"]
                 ),
             )
         else:
@@ -164,6 +172,8 @@ def app_principal():
         st.divider()
         if st.button("🚪 Sair", use_container_width=True):
             del st.session_state["usuario_logado"]
+            if "user" in st.query_params:
+                del st.query_params["user"]
             st.rerun()
 
     # Filtragem dos dados
@@ -259,7 +269,6 @@ def app_principal():
     excedente_meta = max(0.0, vendido_mes - meta_mes)
     pct_meta = (vendido_mes / meta_mes * 100) if meta_mes > 0 else 0.0
 
-    # Cálculos comerciais excluindo domingos
     ritmo_necessario = (
         (falta_meta / dias_uteis_restantes)
         if (falta_meta > 0 and dias_uteis_restantes > 0)
@@ -277,7 +286,6 @@ def app_principal():
         else (100.0 if total_hoje > 0 else 0.0)
     )
 
-    # Acumulado Anual 2026
     total_ano_2026 = df_v_filtrado["valor"].sum()
     comissao_ano_2026 = 0.0
     for ym_item in df_m_filtrado["ano_mes"].unique():
@@ -354,7 +362,6 @@ def app_principal():
                 unsafe_allow_html=True,
             )
 
-        # Termômetro da Meta do Dia
         larg_dia = min(pct_hoje_vs_meta_dia, 100.0)
         st.markdown(
             f"""
@@ -412,7 +419,7 @@ def app_principal():
     st.divider()
 
     # ==========================================================
-    # 3. INDICADORES PRINCIPAIS DO MÊS & VELOCÍMETRO DA META
+    # 3. INDICADORES PRINCIPAIS DO MÊS
     # ==========================================================
     st.markdown(f'<div class="section-header">📊 Fechamento do Mês ({mes_selecionado}) & Acumulado 2026</div>', unsafe_allow_html=True)
 
@@ -469,7 +476,7 @@ def app_principal():
     st.markdown("<br>", unsafe_allow_html=True)
 
     # ==========================================================
-    # 4. GRÁFICOS MODERNOS (GAUGE, SEMANAL, DIÁRIO E ANUAL)
+    # 4. GRÁFICOS (ITEM 1: PARTICIPAÇÃO DA EQUIPE + GAUGE + MENSAL)
     # ==========================================================
     todos_meses_base = sorted(df_m["ano_mes"].unique())
     resumo_mensal = []
@@ -490,15 +497,15 @@ def app_principal():
         )
     df_resumo = pd.DataFrame(resumo_mensal)
 
-    col_g_gauge, col_g_mensal = st.columns([1, 1.55], gap="medium")
+    col_g_gauge, col_g_part, col_g_mensal = st.columns([1, 1, 1.4], gap="medium")
 
     with col_g_gauge:
-        st.markdown('<div class="section-header">🎯 Velocímetro da Meta & Bônus 0,5%</div>', unsafe_allow_html=True)
+        st.markdown('<div class="section-header">🎯 Velocímetro da Meta</div>', unsafe_allow_html=True)
         fig_gauge = go.Figure(
             go.Indicator(
                 mode="gauge+number+delta",
                 value=pct_meta,
-                number={"suffix": "%", "font": {"size": 34, "color": "#f8fafc"}},
+                number={"suffix": "%", "font": {"size": 28, "color": "#f8fafc"}},
                 delta={"reference": 100.0, "increasing": {"color": "#10b981"}, "decreasing": {"color": "#f43f5e"}},
                 gauge={
                     "axis": {"range": [0, max(130, pct_meta + 10)], "tickcolor": "#94a3b8"},
@@ -518,15 +525,41 @@ def app_principal():
             )
         )
         fig_gauge.update_layout(
-            height=320,
-            margin=dict(l=20, r=20, t=30, b=10),
+            height=300,
+            margin=dict(l=15, r=15, t=30, b=10),
             paper_bgcolor="rgba(0,0,0,0)",
             font=dict(color="#e2e8f0"),
         )
         st.plotly_chart(fig_gauge, use_container_width=True)
 
+    with col_g_part:
+        st.markdown(f'<div class="section-header">👥 Participação da Equipe</div>', unsafe_allow_html=True)
+        # Gráfico de Rosca (Item 1)
+        df_mes_part = df_v[df_v["ano_mes"] == mes_selecionado].copy()
+        if not df_mes_part.empty:
+            df_part_grp = df_mes_part.groupby("usuario", as_index=False)["valor"].sum()
+            df_part_grp["Nome"] = df_part_grp["usuario"].map(lambda u: USUARIOS.get(u, {}).get("nome", u))
+            
+            fig_part = px.pie(
+                df_part_grp,
+                names="Nome",
+                values="valor",
+                hole=0.55,
+                color_discrete_sequence=["#3b82f6", "#e11d48", "#10b981"],
+            )
+            fig_part.update_layout(
+                height=300,
+                margin=dict(l=10, r=10, t=20, b=10),
+                paper_bgcolor="rgba(0,0,0,0)",
+                font=dict(color="#e2e8f0"),
+                legend=dict(orientation="h", yanchor="bottom", y=-0.2, xanchor="center", x=0.5),
+            )
+            st.plotly_chart(fig_part, use_container_width=True)
+        else:
+            st.info("Sem dados no mês para participação.")
+
     with col_g_mensal:
-        st.markdown('<div class="section-header">📈 Evolução Mensal 2026 (Realizado vs. Meta)</div>', unsafe_allow_html=True)
+        st.markdown('<div class="section-header">📈 Evolução Mensal 2026</div>', unsafe_allow_html=True)
         if not df_resumo.empty:
             cores_barras = ["#10b981" if b else "#e11d48" for b in df_resumo["Bateu"]]
             fig_mensal = go.Figure()
@@ -545,11 +578,11 @@ def app_principal():
                     name="Meta (R$)",
                     mode="lines+markers",
                     line=dict(color="#f59e0b", width=3, dash="dash"),
-                    marker=dict(size=7),
+                    marker=dict(size=6),
                 )
             )
             fig_mensal.update_layout(
-                height=320,
+                height=300,
                 margin=dict(l=10, r=10, t=20, b=10),
                 paper_bgcolor="rgba(0,0,0,0)",
                 plot_bgcolor="rgba(15,23,42,0.45)",
@@ -559,7 +592,7 @@ def app_principal():
             )
             st.plotly_chart(fig_mensal, use_container_width=True)
 
-    # Segunda linha de gráficos: Diário + Semanal do Mês
+    # Gráficos Diários e Semanais
     df_mes_atual = df_v_filtrado[df_v_filtrado["ano_mes"] == mes_selecionado].copy()
     col_g_dia, col_g_sem = st.columns([1.35, 1], gap="medium")
 
@@ -588,7 +621,7 @@ def app_principal():
                     annotation_position="top left",
                 )
             fig_dia.update_layout(
-                height=300,
+                height=280,
                 margin=dict(l=10, r=10, t=20, b=10),
                 paper_bgcolor="rgba(0,0,0,0)",
                 plot_bgcolor="rgba(15,23,42,0.45)",
@@ -618,7 +651,7 @@ def app_principal():
                 color_discrete_sequence=["#a855f7"],
             )
             fig_sem.update_layout(
-                height=300,
+                height=280,
                 margin=dict(l=10, r=10, t=20, b=10),
                 paper_bgcolor="rgba(0,0,0,0)",
                 plot_bgcolor="rgba(15,23,42,0.45)",
@@ -629,7 +662,7 @@ def app_principal():
             st.info("Sem dados semanais para este mês.")
 
     # ==========================================================
-    # 5. SIMULADOR DE COMISSÃO + HISTÓRICO & GERENCIAMENTO
+    # 5. SIMULADOR + HISTÓRICO & GERENCIAMENTO
     # ==========================================================
     st.divider()
     col_hist, col_gestao = st.columns([1.45, 1.05], gap="medium")
@@ -698,7 +731,7 @@ def app_principal():
                     usuario_meta = st.selectbox(
                         "Usuário:",
                         options=["guiadm", "samarete"],
-                        format_func=lambda x: USUARIOS[x]["label"],
+                        format_func=lambda x: f"Guilherme (guiadm)" if x == "guiadm" else USUARIOS[x]["label"],
                     )
                     lista_meses = sorted(df_m["ano_mes"].unique())
                     mes_edit = st.selectbox(
